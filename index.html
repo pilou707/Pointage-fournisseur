@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Pointage Fournisseur</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+            background: #0f1117; 
+            color: #e2e8f0; 
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 600px; margin: 0 auto; }
+        .card { background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 16px; padding: 22px; margin-bottom: 20px; }
+        .btn { 
+            width: 100%; 
+            padding: 14px; 
+            border: none; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            font-size: 12px; 
+            font-weight: 700;
+            font-family: inherit;
+            margin-bottom: 10px;
+        }
+        .btn-primary { background: #10b981; color: #0f1117; }
+        .btn-secondary { background: #1a1d27; color: #e2e8f0; border: 1px solid #2a2d3a; }
+        .btn-small { width: auto; padding: 8px 12px; font-size: 11px; margin: 5px; }
+        .input { 
+            width: 100%; 
+            padding: 10px 12px; 
+            background: #0f1117; 
+            border: 1px solid #2a2d3a; 
+            border-radius: 8px; 
+            color: #e2e8f0;
+            font-family: inherit;
+            font-size: 12px;
+            margin-bottom: 16px;
+        }
+        select.input {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e2e8f0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            background-size: 20px;
+            padding-right: 32px;
+        }
+        .label { display: block; font-size: 11px; color: #64748b; margin-bottom: 6px; font-weight: 600; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #2a2d3a; }
+        th { color: #64748b; background: rgba(245,158,11,0.12); }
+        .accent { color: #f59e0b; }
+        .green { color: #10b981; }
+        .logs { background: #0f1117; border: 1px solid #2a2d3a; border-radius: 8px; padding: 10px; max-height: 120px; overflow-y: auto; font-size: 9px; color: #94a3b8; margin-bottom: 10px; }
+        h1, h2 { text-align: center; margin-bottom: 20px; color: #f59e0b; }
+        .reserve-icon { font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="app" class="container"></div>
+
+    <script>
+        let state = {
+            phase: 'SETUP',
+            userName: 'Jean Martin',
+            supplier: 'SHANGHAI LOGISTICS',
+            nbPalettes: 10,
+            scanDate: new Date().toISOString().split('T')[0],
+            currentPalette: 1,
+            mode: 'REF',
+            scanInput: '',
+            history: [],
+            showEmailModal: false,
+            showEditModal: false,
+            showReserveModal: false,
+            showPhotoModal: false,
+            showAddEmailModal: false,
+            editIdx: -1,
+            editRef: '',
+            editQty: '',
+            editReserves: [],
+            currentReserveType: null,
+            emailTo: 'barbara.blanchot@immoouest.fr',
+            newEmail: '',
+            savedEmails: ['barbara.blanchot@immoouest.fr', 'pierre-yves.talec@immoouest.fr'],
+            logs: ['Prêt! 🚀']
+        };
+
+        const RESERVE_TYPES = {
+            'etiquette': '🏷️',
+            'mouille': '💧',
+            'carton': '📦'
+        };
+
+        function log(msg) {
+            console.log(msg);
+            state.logs.push(msg);
+            if (state.logs.length > 20) state.logs.shift();
+            render();
+        }
+
+        function loadSavedEmails() {
+            try {
+                const saved = localStorage.getItem('pointage_emails');
+                if (saved) {
+                    state.savedEmails = JSON.parse(saved);
+                    if (!state.savedEmails.includes(state.emailTo)) {
+                        state.emailTo = state.savedEmails[0] || 'barbara.blanchot@immoouest.fr';
+                    }
+                }
+            } catch (e) {
+                console.log('Erreur chargement emails');
+            }
+        }
+
+        function saveEmails() {
+            try {
+                localStorage.setItem('pointage_emails', JSON.stringify(state.savedEmails));
+            } catch (e) {
+                console.log('Erreur sauvegarde emails');
+            }
+        }
+
+        function addNewEmail() {
+            const email = state.newEmail.trim();
+            if (email && !state.savedEmails.includes(email)) {
+                state.savedEmails.push(email);
+                saveEmails();
+                state.emailTo = email;
+                state.newEmail = '';
+                state.showAddEmailModal = false;
+                render();
+            }
+        }
+
+        function handleScan() {
+            const value = state.scanInput.trim();
+            if (!value) return;
+            
+            if (state.mode === 'REF') {
+                state.history.push({ ref: value, qty: null, palette: state.currentPalette, reserves: [] });
+                state.mode = 'QTY';
+            } else {
+                let qty = parseInt(value.toUpperCase().replace('Q', ''));
+                if (isNaN(qty) || qty <= 0) return;
+                state.history[state.history.length - 1].qty = qty;
+                if (state.currentPalette < state.nbPalettes) {
+                    state.currentPalette++;
+                }
+                state.mode = 'REF';
+            }
+            state.scanInput = '';
+            render();
+        }
+
+        function addReserve(type) {
+            state.currentReserveType = type;
+            state.showReserveModal = false;
+            state.showPhotoModal = true;
+            render();
+        }
+
+        function confirmReserve(takePhoto) {
+            const lastItem = state.history[state.history.length - 1];
+            if (lastItem) {
+                if (!lastItem.reserves) lastItem.reserves = [];
+                lastItem.reserves.push({ type: state.currentReserveType, photos: [] });
+                
+                if (takePhoto) {
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = 'image/*';
+                    fileInput.capture = 'environment';
+                    
+                    fileInput.onchange = (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                                const reserve = lastItem.reserves[lastItem.reserves.length - 1];
+                                const photoName = `${lastItem.ref}_${state.currentReserveType}_${lastItem.palette}.jpg`;
+                                reserve.photos.push({
+                                    name: photoName,
+                                    data: event.target.result
+                                });
+                                log('📸 Photo: ' + photoName);
+                                state.showPhotoModal = false;
+                                state.currentReserveType = null;
+                                render();
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    };
+                    fileInput.click();
+                } else {
+                    state.showPhotoModal = false;
+                    state.currentReserveType = null;
+                    render();
+                }
+            }
+        }
+
+        function getRecap() {
+            const recap = {};
+            state.history.forEach(h => {
+                if (h.qty !== null) {
+                    if (!recap[h.ref]) recap[h.ref] = { qty: 0, pals: [], reserves: [] };
+                    recap[h.ref].qty += h.qty;
+                    if (!recap[h.ref].pals.includes(h.palette)) recap[h.ref].pals.push(h.palette);
+                    if (h.reserves && h.reserves.length > 0) {
+                        recap[h.ref].reserves = [...new Set([...recap[h.ref].reserves, ...h.reserves.map(r => r.type)])];
+                    }
+                }
+            });
+            return recap;
+        }
+
+        function buildEmailBody() {
+            const recap = getRecap();
+            let html = '<html><body style="font-family:Arial;background:#f5f5f5;padding:20px;">';
+            html += '<div style="background:white;padding:20px;border-radius:8px;max-width:600px;margin:0 auto;">';
+            html += '<h2 style="color:#f59e0b;">POINTAGE FOURNISSEUR</h2>';
+            html += '<p><b>Opérateur:</b> ' + state.userName + '</p>';
+            html += '<p><b>Fournisseur:</b> ' + state.supplier + '</p>';
+            html += '<table style="width:100%;border-collapse:collapse;margin:20px 0;"><tr style="background:#f59e0b;color:white;"><th style="padding:10px;">RÉF</th><th>QTÉ</th><th>PAL</th><th>RES</th></tr>';
+            Object.entries(recap).forEach(([ref, data]) => {
+                const resIcons = data.reserves.map(r => RESERVE_TYPES[r] || '').join('');
+                html += '<tr><td style="padding:10px;">' + ref + '</td><td>' + data.qty + '</td><td>' + data.pals.length + '</td><td>' + resIcons + '</td></tr>';
+            });
+            html += '</table></div></body></html>';
+            return html;
+        }
+
+        function editHistory(idx) {
+            const scannedItems = state.history.filter(h => h.qty !== null);
+            const item = scannedItems[idx];
+            state.editIdx = idx;
+            state.editRef = item.ref;
+            state.editQty = item.qty.toString();
+            state.editReserves = item.reserves ? [...item.reserves.map(r => r.type)] : [];
+            state.showEditModal = true;
+            render();
+        }
+
+        function saveEdit() {
+            const scannedItems = state.history.filter(h => h.qty !== null);
+            if (state.editRef.trim() && state.editQty) {
+                scannedItems[state.editIdx].ref = state.editRef.trim();
+                scannedItems[state.editIdx].qty = parseInt(state.editQty);
+                scannedItems[state.editIdx].reserves = state.editReserves.map(type => ({ type, photos: [] }));
+            }
+            state.showEditModal = false;
+            state.editIdx = -1;
+            render();
+        }
+
+        function toggleEditReserve(type) {
+            const idx = state.editReserves.indexOf(type);
+            if (idx > -1) {
+                state.editReserves.splice(idx, 1);
+            } else {
+                state.editReserves.push(type);
+            }
+            render();
+        }
+
+        function resetApp() {
+            console.log('Reset called');
+            if (confirm('⚠️ Êtes-vous sûr ? Tout sera effacé !')) {
+                console.log('Confirmed reset');
+                state.phase = 'SETUP';
+                state.currentPalette = 1;
+                state.mode = 'REF';
+                state.scanInput = '';
+                state.history = [];
+                state.logs = ['Prêt! 🚀'];
+                state.showEmailModal = false;
+                state.showEditModal = false;
+                state.showReserveModal = false;
+                state.showPhotoModal = false;
+                state.showAddEmailModal = false;
+                state.editIdx = -1;
+                state.currentReserveType = null;
+                state.newEmail = '';
+                state.editReserves = [];
+                render();
+            }
+        }
+
+        async function sendEmail() {
+            try {
+                log("📤 Début envoi");
+                
+                const recap = getRecap();
+                const totalQty = Object.values(recap).reduce((s, r) => s + r.qty, 0);
+
+                const attachments = [];
+                state.history.forEach(h => {
+                    if (h.reserves && h.reserves.length > 0) {
+                        h.reserves.forEach(reserve => {
+                            if (reserve.photos && reserve.photos.length > 0) {
+                                reserve.photos.forEach(photo => {
+                                    attachments.push({
+                                        filename: photo.name,
+                                        content: photo.data.split(',')[1],
+                                        encoding: 'base64'
+                                    });
+                                });
+                            }
+                        });
+                    }
+                });
+
+                const templateParams = {
+                    to_email: state.emailTo,
+                    operator_name: state.userName,
+                    subject: `Pointage Fournisseur - ${state.supplier}`,
+                    html_message: buildEmailBody(),
+                    attachments: attachments
+                };
+
+                log("✅ Param��tres créés");
+                log("📸 Photos: " + attachments.length);
+                log("📤 Appel Vercel...");
+
+                const vercelUrl = "https://pointage-fournisseur.vercel.app/api/send-email";
+
+                const response = await fetch(vercelUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(templateParams)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    log("✅ EMAIL ENVOYÉ!");
+                    state.showEmailModal = false;
+                    alert(`✅ Email envoyé\n\nDestinataire: ${state.emailTo}\n\n📊 Références: ${Object.keys(recap).length}\n📦 Quantité: ${totalQty}\n📸 Photos: ${attachments.length}`);
+                } else {
+                    log("❌ Erreur: " + (data.error || "Erreur inconnue"));
+                    alert("❌ " + (data.error || "Erreur lors de l'envoi"));
+                }
+                render();
+
+            } catch (error) {
+                log("❌ ERREUR: " + error.message);
+                alert(`❌ Erreur: ${error.message}`);
+                render();
+            }
+        }
+
+        function render() {
+            const app = document.getElementById('app');
+            
+            if (state.phase === 'SETUP') {
+                app.innerHTML = `
+                    <div class="card">
+                        <h1>📦 Pointage Fournisseur</h1>
+                        <label class="label">Opérateur</label>
+                        <input type="text" class="input" id="userName" value="${state.userName}">
+                        <label class="label">Fournisseur</label>
+                        <input type="text" class="input" id="supplier" value="${state.supplier}">
+                        <label class="label">Nb palettes</label>
+                        <input type="number" class="input" id="nbPalettes" value="${state.nbPalettes}">
+                        <button class="btn btn-primary" onclick="state.phase='SCAN';render()">✅ COMMENCER</button>
+                    </div>
+                `;
+                document.getElementById('userName').addEventListener('input', e => state.userName = e.target.value);
+                document.getElementById('supplier').addEventListener('input', e => state.supplier = e.target.value);
+                document.getElementById('nbPalettes').addEventListener('input', e => state.nbPalettes = parseInt(e.target.value));
+            }
+            
+            if (state.phase === 'SCAN') {
+                const scanned = state.history.filter(h => h.qty !== null).length;
+                const allScanned = scanned === state.nbPalettes;
+                
+                if (state.showPhotoModal) {
+                    app.innerHTML = `
+                        <div class="card">
+                            <h2>📸 Prendre une photo ?</h2>
+                            <p style="color:#64748b;margin-bottom:16px;">La photo sera nommée avec la RÉF, l'avarie et la palette.</p>
+                            <button class="btn btn-primary" onclick="confirmReserve(true)">📷 PRENDRE UNE PHOTO</button>
+                            <button class="btn btn-secondary" onclick="confirmReserve(false)">❌ SANS PHOTO</button>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                if (state.showReserveModal) {
+                    app.innerHTML = `
+                        <div class="card">
+                            <h2>⚠️ Ajouter une réserve</h2>
+                            <button class="btn btn-secondary btn-small" onclick="addReserve('etiquette')">🏷️ Problème étiquette</button>
+                            <button class="btn btn-secondary btn-small" onclick="addReserve('mouille')">💧 Palette mouillée</button>
+                            <button class="btn btn-secondary btn-small" onclick="addReserve('carton')">📦 Carton abîmé</button>
+                            <button class="btn btn-secondary" onclick="state.showReserveModal=false;render()" style="margin-top:10px;">← ANNULER</button>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                if (state.showEditModal) {
+                    app.innerHTML = `
+                        <div class="card">
+                            <h2>✏️ Éditer la ligne</h2>
+                            <label class="label">RÉF</label>
+                            <input type="text" class="input" id="editRef" value="${state.editRef}">
+                            <label class="label">QTÉ</label>
+                            <input type="number" class="input" id="editQty" value="${state.editQty}">
+                            <label class="label">Réserves</label>
+                            <div style="margin-bottom:16px;">
+                                <button class="btn btn-secondary btn-small" onclick="toggleEditReserve('etiquette')" style="background:${state.editReserves.includes('etiquette') ? '#10b981' : '#1a1d27'}">🏷️ Étiquette</button>
+                                <button class="btn btn-secondary btn-small" onclick="toggleEditReserve('mouille')" style="background:${state.editReserves.includes('mouille') ? '#10b981' : '#1a1d27'}">💧 Mouillée</button>
+                                <button class="btn btn-secondary btn-small" onclick="toggleEditReserve('carton')" style="background:${state.editReserves.includes('carton') ? '#10b981' : '#1a1d27'}">📦 Carton</button>
+                            </div>
+                            <button class="btn btn-primary" onclick="state.editRef = document.getElementById('editRef').value; state.editQty = document.getElementById('editQty').value; saveEdit();">✅ VALIDER</button>
+                            <button class="btn btn-secondary" onclick="state.showEditModal=false;render()">← ANNULER</button>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                app.innerHTML = `
+                    <div class="card">
+                        <div style="color:#f59e0b;font-weight:700;font-size:16px;text-align:center;">📍 Palette ${state.currentPalette}/${state.nbPalettes}</div>
+                    </div>
+                    <div class="card">
+                        <div style="color:#64748b;font-size:11px;margin-bottom:8px;">Mode: ${state.mode === 'REF' ? '📍 RÉF' : '📊 QTÉ'}</div>
+                        <input type="text" class="input" id="scan" placeholder="${state.mode === 'REF' ? 'Scanner RÉF...' : 'Scanner QTÉ...'}" value="${state.scanInput}" oninput="state.scanInput=this.value;" onkeydown="if(event.key==='Enter'){event.preventDefault();handleScan();}">
+                        <button class="btn btn-secondary" onclick="state.showReserveModal=true;render()">⚠️ RÉSERVE</button>
+                    </div>
+                    <div class="card">
+                        <table>
+                            <thead><tr><th>Pal</th><th>RÉF</th><th>QTÉ</th><th>RES</th><th>✏️</th></tr></thead>
+                            <tbody>${state.history.filter(h => h.qty !== null).map((h, idx) => `
+                                <tr>
+                                    <td>${h.palette}</td>
+                                    <td class="accent">${h.ref}</td>
+                                    <td class="green">${h.qty}</td>
+                                    <td class="reserve-icon">${h.reserves && h.reserves.length > 0 ? h.reserves.map(r => RESERVE_TYPES[r.type] || '').join('') : ''}</td>
+                                    <td><button class="btn btn-secondary" style="width:100%;padding:6px;margin:0;" onclick="editHistory(${idx})">✏️</button></td>
+                                </tr>
+                            `).join('')}</tbody>
+                        </table>
+                    </div>
+                    <button class="btn btn-primary" ${!allScanned ? 'style="opacity:0.5"' : ''} onclick="state.phase='DONE';render()">✅ TERMINER</button>
+                    <button class="btn btn-secondary" onclick="resetApp()">🔄 RAZ</button>
+                `;
+                document.getElementById('scan').focus();
+            }
+            
+            if (state.phase === 'DONE') {
+                if (state.showAddEmailModal) {
+                    app.innerHTML = `
+                        <div class="card">
+                            <h2>➕ Ajouter un email</h2>
+                            <label class="label">Nouvel email</label>
+                            <input type="email" class="input" id="newEmail" placeholder="exemple@domain.fr" value="${state.newEmail}">
+                            <button class="btn btn-primary" onclick="state.newEmail = document.getElementById('newEmail').value; addNewEmail();">✅ AJOUTER</button>
+                            <button class="btn btn-secondary" onclick="state.showAddEmailModal=false;render()">← ANNULER</button>
+                        </div>
+                    `;
+                    document.getElementById('newEmail').focus();
+                    return;
+                }
+
+                if (state.showEmailModal) {
+                    app.innerHTML = `
+                        <div class="card">
+                            <h2>📧 Envoyer email</h2>
+                            <label class="label">Destinataire</label>
+                            <select class="input" id="email" onchange="state.emailTo = this.value; render();">
+                                ${state.savedEmails.map(email => `<option value="${email}" ${email === state.emailTo ? 'selected' : ''}>${email}</option>`).join('')}
+                            </select>
+                            <button class="btn btn-secondary" onclick="state.showAddEmailModal=true;render()" style="margin-bottom:16px;">➕ AJOUTER UN EMAIL</button>
+                            <button class="btn btn-primary" onclick="sendEmail()">✅ ENVOYER</button>
+                            <div class="logs">${state.logs.map(l => `<div>${l}</div>`).join('')}</div>
+                            <button class="btn btn-secondary" onclick="state.showEmailModal=false;render()">← RETOUR</button>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const recap = getRecap();
+                const totalQty = Object.values(recap).reduce((s, r) => s + r.qty, 0);
+                const nbReserves = Object.values(recap).filter(r => r.reserves.length > 0).length;
+                
+                app.innerHTML = `
+                    <div class="card">
+                        <h2>✅ Pointage terminé</h2>
+                        <table>
+                            <thead><tr><th>RÉF</th><th>QTÉ</th><th>PAL</th><th>RES</th></tr></thead>
+                            <tbody>${Object.entries(recap).map(([ref, data]) => `<tr><td class="accent">${ref}</td><td class="green">${data.qty}</td><td>${data.pals.length}</td><td class="reserve-icon">${data.reserves.map(r => RESERVE_TYPES[r] || '').join('')}</td></tr>`).join('')}</tbody>
+                        </table>
+                        <p style="margin-top:16px;color:#f59e0b;">📊 Total: ${Object.keys(recap).length} réf · ${totalQty} u. · ${nbReserves} rés.</p>
+                        <button class="btn btn-primary" onclick="state.showEmailModal=true;render()">📧 EMAIL</button>
+                        <button class="btn btn-secondary" onclick="state.phase='SCAN';render()">← RETOUR</button>
+                    </div>
+                `;
+            }
+        }
+
+        loadSavedEmails();
+        render();
+    </script>
+</body>
+</html>
