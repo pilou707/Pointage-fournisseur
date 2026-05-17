@@ -1,0 +1,7 @@
+{
+  "name": "pointage-fournisseur",
+  "version": "1.0.0",
+  "dependencies": {
+    "resend": "^3.0.0"
+  }
+}
