@@ -297,53 +297,43 @@
                 
                 const recap = getRecap();
                 const totalQty = Object.values(recap).reduce((s, r) => s + r.qty, 0);
+                const nbReferences = Object.keys(recap).length;
 
-                const attachments = [];
+                let photoCount = 0;
                 state.history.forEach(h => {
                     if (h.reserves && h.reserves.length > 0) {
                         h.reserves.forEach(reserve => {
                             if (reserve.photos && reserve.photos.length > 0) {
-                                reserve.photos.forEach(photo => {
-                                    attachments.push({
-                                        filename: photo.name,
-                                        content: photo.data.split(',')[1],
-                                        encoding: 'base64'
-                                    });
-                                });
+                                photoCount += reserve.photos.length;
                             }
                         });
                     }
                 });
 
-                const templateParams = {
-                    to_email: state.emailTo,
-                    operator_name: state.userName,
-                    subject: `Pointage Fournisseur - ${state.supplier}`,
-                    html_message: buildEmailBody(),
-                    attachments: attachments
-                };
+                log("✅ Paramètres créés");
+                log("📸 Photos: " + photoCount);
+                log("📤 Envoi via FormSubmit...");
 
-                log("✅ Param��tres créés");
-                log("📸 Photos: " + attachments.length);
-                log("📤 Appel Vercel...");
+                const emailBody = buildEmailBody();
+                const formData = new FormData();
+                formData.append('email', state.emailTo);
+                formData.append('subject', `Pointage Fournisseur - ${state.supplier}`);
+                formData.append('message', emailBody);
+                formData.append('_captcha', 'false');
+                formData.append('_next', window.location.href);
 
-                const vercelUrl = "https://pointage-fournisseur.vercel.app/api/send-email";
-
-                const response = await fetch(vercelUrl, {
+                const response = await fetch("https://formsubmit.co/ajax/" + state.emailTo, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(templateParams)
+                    body: formData
                 });
-
-                const data = await response.json();
 
                 if (response.ok) {
                     log("✅ EMAIL ENVOYÉ!");
                     state.showEmailModal = false;
-                    alert(`✅ Email envoyé\n\nDestinataire: ${state.emailTo}\n\n📊 Références: ${Object.keys(recap).length}\n📦 Quantité: ${totalQty}\n📸 Photos: ${attachments.length}`);
+                    alert(`✅ Email envoyé\n\nDestinataire: ${state.emailTo}\n\n📊 Références: ${nbReferences}\n📦 Quantité: ${totalQty}\n📸 Photos: ${photoCount}`);
                 } else {
-                    log("❌ Erreur: " + (data.error || "Erreur inconnue"));
-                    alert("❌ " + (data.error || "Erreur lors de l'envoi"));
+                    log("❌ Erreur lors de l'envoi");
+                    alert("❌ Erreur lors de l'envoi. Vérifiez la connexion.");
                 }
                 render();
 
@@ -431,7 +421,7 @@
                     </div>
                     <div class="card">
                         <div style="color:#64748b;font-size:11px;margin-bottom:8px;">Mode: ${state.mode === 'REF' ? '📍 RÉF' : '📊 QTÉ'}</div>
-                        <input type="text" class="input" id="scan" placeholder="${state.mode === 'REF' ? 'Scanner RÉF...' : 'Scanner QTÉ...'}" value="${state.scanInput}" oninput="state.scanInput=this.value;" onkeydown="if(event.key==='Enter'){event.preventDefault();handleScan();}">
+                        <input type="text" class="input" id="scan" placeholder="${state.mode === 'REF' ? 'Scanner RÉF ou tape...' : 'Scanner QTÉ (Q10) ou tape...'}" value="${state.scanInput}" autocomplete="off" oninput="state.scanInput=this.value;" onkeydown="if(event.key==='Enter'){event.preventDefault();handleScan();}" style="font-size:16px;">
                         <button class="btn btn-secondary" onclick="state.showReserveModal=true;render()">⚠️ RÉSERVE</button>
                     </div>
                     <div class="card">
@@ -506,6 +496,26 @@
         }
 
         loadSavedEmails();
+        
+        // Listener global pour le scanner code barre
+        let scannerBuffer = '';
+        let scannerTimeout;
+        
+        document.addEventListener('keydown', (e) => {
+            if (state.phase === 'SCAN') {
+                const scanInput = document.getElementById('scan');
+                if (scanInput && e.key !== 'Enter') {
+                    scanInput.focus();
+                    scannerBuffer += e.key;
+                    
+                    clearTimeout(scannerTimeout);
+                    scannerTimeout = setTimeout(() => {
+                        scannerBuffer = '';
+                    }, 100);
+                }
+            }
+        });
+        
         render();
     </script>
 </body>
